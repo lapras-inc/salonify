@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: salon
+      POSTGRES_PASSWORD: salon
+      POSTGRES_DB: salon_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salon -d salon_dev"]
+      interval: 3s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "3001:3001"
+    env_file: .env
+    environment:
+      # コンテナ内からはホスト名 "db" で接続
+      DATABASE_URL: postgresql://salon:salon@db:5432/salon_dev
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "npx prisma db push --skip-generate &&
+             npx tsx prisma/seed.ts &&
+             npx next dev -p 3001"
+
+volumes:
+  pgdata:

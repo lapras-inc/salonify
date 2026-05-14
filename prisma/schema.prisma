@@ -1,0 +1,231 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  avatarUrl    String?
+  bio          String?
+  emailVerified Boolean @default(false)
+  isAdmin      Boolean  @default(false)
+  stripeCustomerId String?
+  createdAt    DateTime @default(now())
+
+  salonsOwned   Salon[]        @relation("SalonOwner")
+  memberships   Membership[]
+  posts         Post[]
+  threads       Thread[]
+  comments      Comment[]
+  reactions     Reaction[]
+  postReactions PostReaction[]
+  reports       Report[]
+}
+
+model EmailVerification {
+  id           String   @id @default(cuid())
+  email        String
+  code         String
+  displayName  String
+  passwordHash String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([email, code])
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, code])
+}
+
+model Salon {
+  id          String   @id @default(cuid())
+  ownerId     String
+  name        String
+  tagline     String
+  description String
+  coverUrl    String?
+  thumbUrl    String?
+  category    String
+  visibility  String   @default("public") // public | private | invite
+  createdAt   DateTime @default(now())
+
+  owner       User         @relation("SalonOwner", fields: [ownerId], references: [id])
+  plans       Plan[]
+  memberships Membership[]
+  posts       Post[]
+  threads     Thread[]
+  invites     Invite[]
+
+  @@index([ownerId])
+  @@index([visibility, createdAt])
+}
+
+model Invite {
+  id        String    @id @default(cuid())
+  salonId   String
+  code      String    @unique
+  label     String    @default("") // 用途メモ (e.g. "Twitter用", "友人向け")
+  maxUses   Int       @default(0) // 0 = unlimited
+  uses      Int       @default(0)
+  disabled  Boolean   @default(false)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  salon Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+}
+
+model Plan {
+  id            String @id @default(cuid())
+  salonId       String
+  name          String
+  priceJpy      Int
+  trialDays     Int    @default(0)
+  introDiscount Int    @default(0) // yen off first month
+  description   String?
+  stripePriceId String?
+
+  salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+
+  @@index([salonId])
+}
+
+model Membership {
+  id          String   @id @default(cuid())
+  userId      String
+  salonId     String
+  planId      String
+  stripeSubscriptionId String?
+  status      String   @default("active") // active | past_due | cancelled | suspended
+  joinedAt    DateTime @default(now())
+  nextBillAt  DateTime
+  failedCount Int      @default(0)
+
+  user     User       @relation(fields: [userId], references: [id])
+  salon    Salon      @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  plan     Plan       @relation(fields: [planId], references: [id])
+  invoices Invoice[]
+
+  @@unique([userId, salonId])
+  @@index([salonId, status])
+  @@index([userId, status])
+  @@index([stripeSubscriptionId])
+}
+
+model Invoice {
+  id           String   @id @default(cuid())
+  membershipId String
+  amountJpy    Int
+  status       String   // paid | failed | refunded
+  createdAt    DateTime @default(now())
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@index([membershipId])
+}
+
+model Post {
+  id         String   @id @default(cuid())
+  salonId    String
+  authorId   String
+  title      String
+  bodyHtml     String
+  bodyMarkdown String?
+  videoUrl     String?
+  visibility String   @default("all") // all | plan:<planId>
+  pinned     Boolean  @default(false)
+  draft      Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  salon     Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  author    User           @relation(fields: [authorId], references: [id])
+  reactions PostReaction[]
+
+  @@index([salonId, createdAt])
+}
+
+model Thread {
+  id        String   @id @default(cuid())
+  salonId   String
+  authorId  String
+  title     String
+  body      String
+  createdAt DateTime @default(now())
+
+  salon    Salon      @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  author   User       @relation(fields: [authorId], references: [id])
+  comments Comment[]
+  reactions Reaction[]
+  reports   Report[]
+
+  @@index([salonId, createdAt])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  threadId  String
+  authorId  String
+  parentId  String?
+  body      String
+  createdAt DateTime @default(now())
+
+  thread  Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author  User     @relation(fields: [authorId], references: [id])
+  parent  Comment? @relation("CommentParent", fields: [parentId], references: [id])
+  replies Comment[] @relation("CommentParent")
+
+  @@index([threadId, createdAt])
+  @@index([parentId])
+}
+
+model Reaction {
+  id       String @id @default(cuid())
+  threadId String
+  userId   String
+  kind     String @default("like")
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([threadId, userId, kind])
+}
+
+model PostReaction {
+  id     String @id @default(cuid())
+  postId String
+  userId String
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([postId, userId])
+  @@index([postId])
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  threadId   String?
+  reporterId String
+  reason     String
+  resolved   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  thread   Thread? @relation(fields: [threadId], references: [id])
+  reporter User    @relation(fields: [reporterId], references: [id])
+}
